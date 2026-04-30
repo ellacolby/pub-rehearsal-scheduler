@@ -1,0 +1,70 @@
+# Path to the Google Cloud service account JSON key
+credentials_path = "credentials.json"
+
+# Email to share the generated output sheet with (your account)
+share_with_email = "ella.r.colby@gmail.com"
+
+[sheets]
+# Spreadsheet IDs (the long string in the URL between /d/ and /edit)
+dancer_availability = "1x2jUuf8RCkwsmIhJiuLcS5VYtZX1MuG2sLaQhyiTmlA"
+room_availability   = "1qLxQ0EGMrgjGZ435Eqo0QhhfGH2QiDu8lI80vcMkhJU"
+casting             = "1uObvvWJYsz5eBcVVIViJ4ZpVk4zZrHXFRqF8coBUBtI"
+# Leave empty on first run — script will create the output sheet and print its URL.
+# Paste it here on subsequent runs to overwrite the same output sheet.
+output              = ""
+
+[tabs]
+# Tab name in the dancer availability sheet that contains the recurring weekly conflicts
+dancer_weekly_tab = "WEEKLY CONFLICTS"
+
+[parsing]
+# 1-indexed row in the dancer sheet where day-of-week labels live (e.g. MONDAY, TUESDAY)
+dancer_day_row = 4
+# 1-indexed row where time-of-day labels live (e.g. "8:30pm - 9:30pm")
+dancer_time_row = 5
+# 1-indexed row where the first dancer's row begins
+dancer_first_data_row = 6
+# 1-indexed column where the dancer's name lives
+dancer_name_col = 2
+
+# Room sheet
+# 1-indexed row where room names appear (column headers like "Bloomberg", "Roberts")
+room_name_row = 1
+# 1-indexed row where time slots begin in column A
+room_first_time_row = 2
+# Cell value indicating "this slot is available for our group"
+pub_label = "PUB"
+
+# Slot labels containing any of these keywords are excluded (e.g. mandatory all-company rehearsals)
+excluded_slot_keywords = ["COMPANY"]
+
+# Casting sheet
+# 1-indexed row where each column's dance/choreographer name lives
+casting_dance_name_row = 2
+# 1-indexed row where the first dancer's name appears (under each dance column)
+casting_first_dancer_row = 6
+
+# Map a casting-sheet name to a dancer's full name in the availability sheet.
+# Useful for nicknames or typos. Casting names match case-insensitively.
+[name_aliases]
+# "Maddie" = "MADELINE ROHDE"
+
+# Priority weights — higher = more important. Default 1. Priority dances are
+# scheduled first when slots run out, get longer slots when available, and are
+# more strongly placed at conflict-free times. Use for pieces that missed last
+# week, are less polished, etc. Keys match dance/choreographer names case-insensitively.
+[priorities]
+# "GISELE" = 5
+
+[solver]
+# Slot lengths to consider (minutes). Solver picks the longest possible while still fitting all dances.
+slot_durations_minutes = [60, 90]
+# Penalty weights — orange is a soft "would prefer not", red is a hard "can't make it"
+orange_penalty = 1
+red_penalty = 100
+# How many distinct schedule options to generate
+num_options = 5
+# Time limit per option in seconds
+time_limit_seconds = 30
+# Stretch goal: allow a dance to be scheduled twice per week if rooms permit
+allow_twice_per_week = false

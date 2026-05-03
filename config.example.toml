@@ -17,6 +17,12 @@ output              = ""
 # Tab name in the dancer availability sheet that contains the recurring weekly conflicts
 dancer_weekly_tab = "WEEKLY CONFLICTS"
 
+# Optional: monday-of-the-week (YYYY-MM-DD) you're scheduling for. If set, one-off
+# conflicts in monthly tabs (FEBRUARY/MARCH/APRIL CONFLICTS, etc.) whose dates fall
+# in this 7-day window get stacked onto the weekly grid (worst-of severity).
+# Leave empty to ignore monthly tabs entirely.
+target_week_start = ""
+
 [parsing]
 # 1-indexed row in the dancer sheet where day-of-week labels live (e.g. MONDAY, TUESDAY)
 dancer_day_row = 4

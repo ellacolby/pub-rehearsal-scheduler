@@ -1,4 +1,5 @@
 import colorsys
+import datetime
 import re
 from typing import Optional
 
@@ -34,11 +35,12 @@ def classify_color(rgb: Optional[dict]) -> Avail:
 
 # ================================ Time parsing =================================
 
-_TIME_TOKEN_RE = re.compile(r"^\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\s*$", re.IGNORECASE)
+_TIME_TOKEN_RE = re.compile(r"^\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m?)?\s*$", re.IGNORECASE)
 
 
 def parse_time(token: str) -> str:
-    """'8AM' / '8:30pm' / '12:00pm' → '08:00' / '20:30' / '12:00' (24h)."""
+    """'8AM' / '8:30pm' / '9p' / '12:00pm' → '08:00' / '20:30' / '21:00' / '12:00' (24h).
+    Single-letter 'p' or 'a' is accepted as shorthand for pm/am."""
     t = token.strip().lower()
     t = t.replace("midnight", "12am").replace("noon", "12pm")
     t = t.replace(" ", "").replace(".", "")
@@ -48,9 +50,9 @@ def parse_time(token: str) -> str:
     hour = int(m.group(1))
     minute = int(m.group(2) or 0)
     meridiem = (m.group(3) or "").lower()
-    if meridiem == "pm" and hour != 12:
+    if meridiem.startswith("p") and hour != 12:
         hour += 12
-    elif meridiem == "am" and hour == 12:
+    elif meridiem.startswith("a") and hour == 12:
         hour = 0
     return f"{hour:02d}:{minute:02d}"
 
@@ -160,13 +162,13 @@ def _find_sheet(workbook: dict, tab_name: str) -> Optional[dict]:
 def parse_dancer_availability(
     workbook: dict, config
 ) -> tuple[list[Dancer], list[tuple[str, str, str]]]:
-    """Read the WEEKLY CONFLICTS tab. Returns (dancers, excluded_times).
+    """Read WEEKLY CONFLICTS, plus any monthly tabs that contain dates inside
+    `config.target_week_start`'s week. Returns (dancers, excluded_times).
 
-    Each Dancer has an `availability` dict keyed by (day, start, end) for every
-    column where the dancer can mark a conflict. `excluded_times` is the list of
-    (day, start, end) tuples for columns labeled with config.excluded_slot_keywords
-    (e.g. COMPANY) — candidate slots overlapping these are skipped (mandatory
-    company-wide events, not for scheduling).
+    Per-cell availability stacks: at each (day, start, end) key, the worst
+    severity across the weekly tab and any matching monthly tab wins. The
+    overlap-aware lookup in `dancer_availability_at` further takes the worst
+    across all overlapping conflict columns.
     """
     sheet = _find_sheet(workbook, config.dancer_weekly_tab)
     if sheet is None:
@@ -178,28 +180,7 @@ def parse_dancer_availability(
         return [], []
     rowdata = data[0].get("rowData", []) or []
 
-    day_row = _row_values(rowdata, config.dancer_day_row - 1)
-    time_row = _row_values(rowdata, config.dancer_time_row - 1)
-    excluded_kw = [kw.lower() for kw in (getattr(config, "excluded_slot_keywords", []) or [])]
-
-    available_columns: list[tuple[int, str, str, str]] = []  # (col_idx, day, start, end)
-    excluded_times: list[tuple[str, str, str]] = []          # (day, start, end)
-    for col_idx in range(max(len(day_row), len(time_row))):
-        day_text = _cell_text(day_row[col_idx]) if col_idx < len(day_row) else ""
-        time_text = _cell_text(time_row[col_idx]) if col_idx < len(time_row) else ""
-        if not day_text or not time_text:
-            continue
-        day_norm = _normalize_day_label(day_text)
-        if day_norm is None:
-            continue
-        try:
-            start, end = parse_time_range(time_text)
-        except ValueError:
-            continue
-        if any(kw in time_text.lower() for kw in excluded_kw):
-            excluded_times.append((day_norm, start, end))
-        else:
-            available_columns.append((col_idx, day_norm, start, end))
+    available_columns, excluded_times = _parse_conflict_columns(rowdata, config, target_dates=None)
 
     name_col = config.dancer_name_col - 1
     dancers: list[Dancer] = []
@@ -216,7 +197,365 @@ def parse_dancer_availability(
             avail = classify_color(_cell_bg(row[col_idx])) if col_idx < len(row) else Avail.UNKNOWN
             d.availability[(day, start, end)] = avail
         dancers.append(d)
+
+    # Apply monthly-tab overrides for the target week (if configured)
+    target_week_start = getattr(config, "target_week_start", "") or ""
+    if target_week_start:
+        target_dates = _week_dates(target_week_start)
+        if target_dates:
+            n = _apply_monthly_overrides(workbook, config, dancers, excluded_times, target_dates)
+            if n:
+                print(
+                    f"Applied {n} one-off conflict cell(s) from monthly tabs "
+                    f"for week of {target_week_start}."
+                )
+        else:
+            print(
+                f"WARNING: target_week_start={target_week_start!r} is not a valid YYYY-MM-DD date; "
+                "monthly overrides skipped."
+            )
+
     return dancers, excluded_times
+
+
+def _parse_conflict_columns(
+    rowdata: list,
+    config,
+    target_dates: Optional[list[datetime.date]] = None,
+) -> tuple[list[tuple[int, str, str, str]], list[tuple[str, str, str]]]:
+    """Parse the day-row and time-row of a conflicts tab.
+    Returns (available_columns, excluded_times).
+
+    If target_dates is None, day-cells are read as day-of-week names (weekly tab).
+    If target_dates is provided, day-cells are read as dates (e.g. 'Sun 4/26'),
+    and only columns whose date is in target_dates are included; the day-of-week
+    is derived from the matched date.
+    """
+    day_row = _row_values(rowdata, config.dancer_day_row - 1)
+    time_row = _row_values(rowdata, config.dancer_time_row - 1)
+    excluded_kw = [kw.lower() for kw in (getattr(config, "excluded_slot_keywords", []) or [])]
+
+    available_columns: list[tuple[int, str, str, str]] = []
+    excluded_times: list[tuple[str, str, str]] = []
+    for col_idx in range(max(len(day_row), len(time_row))):
+        day_text = _cell_text(day_row[col_idx]) if col_idx < len(day_row) else ""
+        time_text = _cell_text(time_row[col_idx]) if col_idx < len(time_row) else ""
+        if not day_text or not time_text:
+            continue
+        if target_dates is None:
+            day_norm = _normalize_day_label(day_text)
+        else:
+            matched = _match_monthly_date(day_text, target_dates)
+            if matched is None:
+                continue
+            day_norm = matched.strftime("%A")
+        if day_norm is None:
+            continue
+        try:
+            start, end = parse_time_range(time_text)
+        except ValueError:
+            continue
+        if any(kw in time_text.lower() for kw in excluded_kw):
+            excluded_times.append((day_norm, start, end))
+        else:
+            available_columns.append((col_idx, day_norm, start, end))
+    return available_columns, excluded_times
+
+
+def _apply_monthly_overrides(
+    workbook: dict,
+    config,
+    dancers: list[Dancer],
+    excluded_times: list[tuple[str, str, str]],
+    target_dates: list[datetime.date],
+) -> int:
+    """Walk monthly conflict tabs (calendar layout) and stack their notes onto
+    each dancer's availability. Returns the count of overrides applied.
+
+    For each calendar cell falling on a target date, free-text notes are split on
+    ';' and parsed for:
+      - "OOT"                 → dancer unavailable all day (RED 00:00–23:59)
+      - "X-Y" / "Xpm-Ypm"     → dancer unavailable for that range
+      - "X pm onward / eod"   → dancer unavailable from X until end of day
+    Dancer names are matched by first name (case-insensitive) at the start of
+    each phrase. Notes that don't contain a recognized dancer or time are skipped.
+    """
+    weekly_lower = config.dancer_weekly_tab.strip().lower()
+    by_first: dict[str, list[Dancer]] = {}
+    for d in dancers:
+        by_first.setdefault(d.first_name.lower(), []).append(d)
+
+    # Also let calendar text reuse name_aliases (e.g. "Maddie" → MADELINE ROHDE).
+    aliases = getattr(config, "name_aliases", {}) or {}
+    by_full_name = {d.full_name.lower(): d for d in dancers}
+    for alias_key, full_name in aliases.items():
+        target = by_full_name.get(str(full_name).strip().lower())
+        if target is None:
+            continue
+        alias_first = str(alias_key).strip().split()[0].lower() if alias_key.strip() else ""
+        if alias_first and target not in by_first.get(alias_first, []):
+            by_first.setdefault(alias_first, []).append(target)
+
+    n_applied = 0
+    for sheet in workbook.get("sheets", []):
+        title = sheet.get("properties", {}).get("title", "").strip()
+        if title.lower() == weekly_lower:
+            continue
+        data = sheet.get("data", [])
+        if not data:
+            continue
+        rowdata = data[0].get("rowData", []) or []
+
+        for dancer, day_name, start, end in _parse_calendar_overrides(
+            rowdata, title, target_dates, by_first
+        ):
+            key = (day_name, start, end)
+            existing = dancer.availability.get(key, Avail.UNKNOWN)
+            if _AVAIL_SEVERITY[Avail.RED] > _AVAIL_SEVERITY.get(existing, 0):
+                dancer.availability[key] = Avail.RED
+                n_applied += 1
+    return n_applied
+
+
+# Each calendar day cell occupies 2 columns: label on the left, date number on the right.
+_CALENDAR_DAY_COLS = [
+    (0, 1, "Sunday"),
+    (2, 3, "Monday"),
+    (4, 5, "Tuesday"),
+    (6, 7, "Wednesday"),
+    (8, 9, "Thursday"),
+    (10, 11, "Friday"),
+    (12, 13, "Saturday"),
+]
+
+
+def _parse_calendar_overrides(
+    rowdata: list,
+    tab_title: str,
+    target_dates: list[datetime.date],
+    by_first: dict[str, list[Dancer]],
+) -> list[tuple[Dancer, str, str, str]]:
+    """Parse one calendar-layout monthly tab. Returns (dancer, day_of_week, start_24h, end_24h)
+    tuples for each conflict whose date is in target_dates."""
+    tab_year, tab_month = _parse_calendar_month(tab_title)
+    if tab_year is None or tab_month is None:
+        return []
+
+    target_set = set(target_dates)
+    out: list[tuple[Dancer, str, str, str]] = []
+
+    for ridx, row_struct in enumerate(rowdata):
+        row = row_struct.get("values", []) or []
+        active_cells: list[tuple[int, str]] = []  # (label_col, day_name)
+        for label_col, date_col, day_name in _CALENDAR_DAY_COLS:
+            if date_col >= len(row):
+                continue
+            txt = _cell_text(row[date_col])
+            if not txt.isdigit():
+                continue
+            day_num = int(txt)
+            if not (1 <= day_num <= 31):
+                continue
+            try:
+                date = datetime.date(tab_year, tab_month, day_num)
+            except ValueError:
+                continue
+            if date in target_set:
+                active_cells.append((label_col, day_name))
+        if not active_cells:
+            continue
+
+        # Walk subsequent rows until the next date row
+        for nr in range(ridx + 1, len(rowdata)):
+            n_row = rowdata[nr].get("values", []) or []
+            if _looks_like_calendar_date_row(n_row):
+                break
+            for label_col, day_name in active_cells:
+                if label_col >= len(n_row):
+                    continue
+                text = _cell_text(n_row[label_col])
+                if not text:
+                    continue
+                for fragment in re.split(r"[;\n]+", text):
+                    fragment = fragment.strip()
+                    if fragment:
+                        out.extend(_parse_conflict_phrase(fragment, day_name, by_first))
+    return out
+
+
+def _looks_like_calendar_date_row(row: list) -> bool:
+    digit_cells = 0
+    for cell in row:
+        txt = _cell_text(cell)
+        if txt.isdigit() and 1 <= int(txt) <= 31:
+            digit_cells += 1
+    return digit_cells >= 4
+
+
+def _parse_calendar_month(tab_title: str) -> tuple[Optional[int], Optional[int]]:
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+    title_lower = tab_title.lower()
+    month = None
+    for name, num in months.items():
+        if name in title_lower:
+            month = num
+            break
+    if month is None:
+        return None, None
+    year_match = re.search(r"(20\d{2})", tab_title)
+    year = int(year_match.group(1)) if year_match else datetime.date.today().year
+    return year, month
+
+
+_NAME_TOKEN_RE = re.compile(r"[A-Za-z]+")
+_OOT_RE = re.compile(r"\bOOT\b|\ball\s*day\b", re.IGNORECASE)
+_RANGE_RE = re.compile(
+    r"(\d{1,2})(?::(\d{2}))?\s*([ap]m?)?\s*[-–—]\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m?)?",
+    re.IGNORECASE,
+)
+_FUZZY_END_RANGE_RE = re.compile(
+    r"(\d{1,2})(?::(\d{2}))?\s*([ap]m?)\s*[-–—]\s*(?:late|eod|end\s+of\s+day|midnight)",
+    re.IGNORECASE,
+)
+_EOD_RE = re.compile(
+    r"(\d{1,2})(?::(\d{2}))?\s*([ap]m?)\s*(?:on(?:ward)?s?\b|to\s*eod\b|\beod\b|end\s+of\s+day)",
+    re.IGNORECASE,
+)
+
+
+def _resolve_name_token(token: str, by_first: dict[str, list[Dancer]]) -> list[Dancer]:
+    """Resolve a name-ish token to a list of matching dancers.
+    Tries: exact first-name match, then 'firstinitial' split (e.g., 'lucyp' → Lucy P)."""
+    direct = by_first.get(token.lower(), [])
+    if direct:
+        return direct
+    # Try splitting "lucyp" → "lucy" + "p"
+    for split_pt in range(len(token) - 1, 1, -1):
+        first_part = token[:split_pt].lower()
+        initial_part = token[split_pt:]
+        if len(initial_part) != 1 or not initial_part.isalpha():
+            continue
+        first_candidates = by_first.get(first_part, [])
+        if not first_candidates:
+            continue
+        refined = [c for c in first_candidates if c.last_initial == initial_part.upper()]
+        if len(refined) == 1:
+            return refined
+    return []
+
+
+def _parse_conflict_phrase(
+    text: str,
+    day_name: str,
+    by_first: dict[str, list[Dancer]],
+) -> list[tuple[Dancer, str, str, str]]:
+    """Parse a single conflict phrase. Returns list of (dancer, day_name, start_24h, end_24h)."""
+    text = text.strip()
+    if not text:
+        return []
+
+    # Pull leading dancer-name tokens (separated by whitespace, '/', '&', ',', or 'and')
+    matched: list[Dancer] = []
+    rest = text
+    while True:
+        m = _NAME_TOKEN_RE.match(rest)
+        if not m:
+            break
+        token = m.group(0)
+        candidates = _resolve_name_token(token, by_first)
+        if not candidates:
+            break
+        if len(candidates) == 1:
+            matched.append(candidates[0])
+        else:
+            # Ambiguous first name — try next char as last-initial
+            next_pos = m.end()
+            if next_pos < len(rest) and rest[next_pos].isalpha():
+                initial = rest[next_pos].upper()
+                refined = [c for c in candidates if c.last_initial == initial]
+                if len(refined) == 1:
+                    matched.append(refined[0])
+                    rest = rest[next_pos + 1:].lstrip(" /&,")
+                    sep = re.match(r"\s*(?:and\b|&|,|/)\s*", rest, re.IGNORECASE)
+                    if sep:
+                        rest = rest[sep.end():]
+                        continue
+                    break
+            matched.extend(candidates)  # apply to all if still ambiguous
+        rest = rest[m.end():].lstrip(" /&,")
+        sep = re.match(r"\s*(?:and\b|&|,|/)\s*", rest, re.IGNORECASE)
+        if sep:
+            rest = rest[sep.end():]
+            continue
+        break
+
+    if not matched:
+        return []
+
+    rest = rest.strip()
+
+    if _OOT_RE.search(rest):
+        return [(d, day_name, "00:00", "23:59") for d in matched]
+
+    # "Xpm-late", "Xpm-eod", "Xpm-midnight" — start to end-of-day
+    fuzzy = _FUZZY_END_RANGE_RE.search(rest)
+    if fuzzy:
+        try:
+            start_str = f"{fuzzy.group(1)}{':' + fuzzy.group(2) if fuzzy.group(2) else ''}{fuzzy.group(3).lower()}"
+            return [(d, day_name, parse_time(start_str), "23:59") for d in matched]
+        except ValueError:
+            pass
+
+    rng = _RANGE_RE.search(rest)
+    if rng:
+        try:
+            start_24h, end_24h = _parse_range_match(rng)
+            return [(d, day_name, start_24h, end_24h) for d in matched]
+        except ValueError:
+            pass
+
+    eod = _EOD_RE.search(rest)
+    if eod:
+        try:
+            start_24h = _parse_eod_match(eod)
+            return [(d, day_name, start_24h, "23:59") for d in matched]
+        except ValueError:
+            pass
+
+    return []
+
+
+def _parse_range_match(m: re.Match) -> tuple[str, str]:
+    s_h, s_m, s_mer, e_h, e_m, e_mer = m.groups()
+    start_str = f"{s_h}{':' + s_m if s_m else ''}{(s_mer or '').lower()}"
+    end_str = f"{e_h}{':' + e_m if e_m else ''}{(e_mer or '').lower()}"
+    if not s_mer and not e_mer:
+        # Neither has meridiem — assume PM (most rehearsal conflicts are evenings)
+        start_str += "pm"
+        end_str += "pm"
+    elif not s_mer:
+        start_str += (e_mer or "").lower()
+    elif not e_mer:
+        end_str += (s_mer or "").lower()
+    return parse_time(start_str), parse_time(end_str)
+
+
+def _parse_eod_match(m: re.Match) -> str:
+    h, mn, mer = m.groups()
+    s = f"{h}{':' + mn if mn else ''}{mer.lower()}"
+    return parse_time(s)
+
+
+def _week_dates(start_iso: str) -> list[datetime.date]:
+    try:
+        start = datetime.date.fromisoformat(start_iso)
+    except ValueError:
+        return []
+    return [start + datetime.timedelta(days=i) for i in range(7)]
 
 
 # ============================== Room availability =============================

@@ -107,6 +107,32 @@ any conflict-column overlapping that slot's time on that day. If a slot falls
 outside any column the dancer answered for, the dancer is treated as available
 there.
 
+### One-off conflicts (monthly tabs)
+
+If you set `target_week_start` in `config.toml` to a date inside the week you're
+scheduling for, the script also reads the monthly conflict tabs (e.g.
+`APRIL CONFLICTS`) and stacks any per-day notes onto the weekly grid (worst-of
+severity wins).
+
+The monthly tabs use a **calendar layout** — one cell per date, free-text notes
+inside. The parser extracts conflicts written like:
+
+| Phrase | Effect |
+|--------|--------|
+| `Deeta OOT` / `Deeta all day` | RED for whole day |
+| `Cici meeting 7-9pm` | RED 7pm–9pm |
+| `Blaise midterm 9am-12pm` | RED 9am–12pm |
+| `Helena 6pm onward` / `Lucy 5pm to eod` | RED start–end of day |
+| `Ritika 6pm-late` / `Ava 7-midnight` | RED start–end of day |
+
+Multiple conflicts in one cell can be separated by `;`. Names can also be slash- or
+ampersand-joined, e.g. `Rika & Spencer 9:30-11:30` or `lucyp/Lulu/Lilly 7-9pm`.
+Stuck-together first-name + initial like `lucyp` resolves to Lucy P.
+
+Phrases that don't contain a recognized first name and time pattern are skipped
+silently. The startup log line "`Applied N one-off conflict cell(s)…`" tells you
+how many overrides were applied.
+
 ### Hard constraints
 
 - **One dance per slot**: a (room, day, time) cell holds at most one dance.
@@ -163,6 +189,9 @@ output              = "..."   # required — create manually and paste the ID
 
 [tabs]
 dancer_weekly_tab = "WEEKLY CONFLICTS"
+# Optional: when set, monthly-tab one-off conflicts within this 7-day window get
+# stacked onto the weekly grid. Leave empty to ignore monthly tabs.
+target_week_start = ""   # YYYY-MM-DD
 
 [parsing]
 # 1-indexed rows/columns in the dancer sheet

@@ -14,6 +14,7 @@ class Config:
     sheet_output: str
 
     dancer_weekly_tab: str
+    target_week_start: str  # YYYY-MM-DD; if set, monthly-tab overrides for that week stack onto weekly
 
     dancer_day_row: int
     dancer_time_row: int
@@ -62,6 +63,7 @@ def load_config(path: str = "config.toml") -> Config:
         sheet_casting=sheets["casting"],
         sheet_output=sheets.get("output", ""),
         dancer_weekly_tab=tabs["dancer_weekly_tab"],
+        target_week_start=str(tabs.get("target_week_start", "")).strip(),
         dancer_day_row=parsing["dancer_day_row"],
         dancer_time_row=parsing["dancer_time_row"],
         dancer_first_data_row=parsing["dancer_first_data_row"],

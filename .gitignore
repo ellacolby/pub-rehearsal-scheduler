@@ -5,3 +5,8 @@ venv/
 .DS_Store
 credentials.json
 config.toml
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec

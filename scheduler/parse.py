@@ -479,14 +479,14 @@ def _parse_conflict_phrase(
                 refined = [c for c in candidates if c.last_initial == initial]
                 if len(refined) == 1:
                     matched.append(refined[0])
-                    rest = rest[next_pos + 1:].lstrip(" /&,")
+                    rest = rest[next_pos + 1:]
                     sep = re.match(r"\s*(?:and\b|&|,|/)\s*", rest, re.IGNORECASE)
                     if sep:
                         rest = rest[sep.end():]
                         continue
                     break
             matched.extend(candidates)  # apply to all if still ambiguous
-        rest = rest[m.end():].lstrip(" /&,")
+        rest = rest[m.end():]
         sep = re.match(r"\s*(?:and\b|&|,|/)\s*", rest, re.IGNORECASE)
         if sep:
             rest = rest[sep.end():]

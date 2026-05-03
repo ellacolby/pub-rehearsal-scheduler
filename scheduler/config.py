@@ -1,6 +1,37 @@
+import re
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def extract_sheet_id(url_or_id: str) -> str:
+    """Accept either a bare spreadsheet ID or a Google Sheets URL.
+    Returns just the ID. Lets non-tech users paste a URL straight from the browser."""
+    s = (url_or_id or "").strip()
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", s)
+    if m:
+        return m.group(1)
+    return s
+
+
+def app_dir() -> Path:
+    """Directory next to which `config.toml` and `credentials.json` should live.
+
+    When running as a frozen PyInstaller executable, this is the directory
+    containing the .exe / binary itself, so the user can drop config files
+    next to the binary they double-clicked. Otherwise, current working dir."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path.cwd()
+
+
+def resolve_path(maybe_relative: str) -> Path:
+    """Resolve `maybe_relative` against app_dir() if not already absolute."""
+    p = Path(maybe_relative)
+    if p.is_absolute():
+        return p
+    return (app_dir() / p).resolve()
 
 
 @dataclass
@@ -42,10 +73,11 @@ class Config:
 
 
 def load_config(path: str = "config.toml") -> Config:
-    p = Path(path)
+    p = resolve_path(path)
     if not p.exists():
         raise FileNotFoundError(
-            f"{path} not found. Copy config.example.toml to config.toml and fill it in."
+            f"{p} not found. Copy config.example.toml to config.toml next to the "
+            "executable (or current directory) and fill it in."
         )
     with p.open("rb") as f:
         data = tomllib.load(f)
@@ -58,10 +90,10 @@ def load_config(path: str = "config.toml") -> Config:
     return Config(
         credentials_path=data["credentials_path"],
         share_with_email=data.get("share_with_email", ""),
-        sheet_dancer=sheets["dancer_availability"],
-        sheet_room=sheets["room_availability"],
-        sheet_casting=sheets["casting"],
-        sheet_output=sheets.get("output", ""),
+        sheet_dancer=extract_sheet_id(sheets["dancer_availability"]),
+        sheet_room=extract_sheet_id(sheets["room_availability"]),
+        sheet_casting=extract_sheet_id(sheets["casting"]),
+        sheet_output=extract_sheet_id(sheets.get("output", "")),
         dancer_weekly_tab=tabs["dancer_weekly_tab"],
         target_week_start=str(tabs.get("target_week_start", "")).strip(),
         dancer_day_row=parsing["dancer_day_row"],

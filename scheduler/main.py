@@ -1,7 +1,7 @@
+import datetime
 import sys
-from pathlib import Path
 
-from .config import load_config
+from .config import load_config, resolve_path
 from .model import _pretty_time
 from .output import OutputSetupNeeded, spreadsheet_url, write_schedules_to_sheet
 from .parse import (
@@ -14,17 +14,49 @@ from .sheets import build_clients, fetch_with_grid
 from .solve import solve
 
 
+def _resolve_target_week(config_value: str) -> str:
+    """Prompt the user for a target-week-start date when running interactively.
+    Returns YYYY-MM-DD. Default = next Monday (or config_value if it's set)."""
+    today = datetime.date.today()
+    days_until_mon = (7 - today.weekday()) % 7 or 7
+    suggested = (today + datetime.timedelta(days=days_until_mon)).isoformat()
+    default = config_value.strip() if config_value else suggested
+
+    if not sys.stdin.isatty():
+        return default
+
+    while True:
+        try:
+            response = input(
+                f"Schedule for the week starting (YYYY-MM-DD) [{default}]: "
+            ).strip()
+        except EOFError:
+            return default
+        if not response:
+            return default
+        if response.lower() in {"none", "off", "skip", "-"}:
+            return ""  # explicit disable of monthly overrides
+        try:
+            datetime.date.fromisoformat(response)
+            return response
+        except ValueError:
+            print(f"  '{response}' isn't a valid YYYY-MM-DD date — try again.")
+
+
 def main() -> None:
     cfg = load_config()
+    cfg.target_week_start = _resolve_target_week(cfg.target_week_start)
 
-    if not Path(cfg.credentials_path).exists():
+    cred_path = resolve_path(cfg.credentials_path)
+    if not cred_path.exists():
         sys.exit(
-            f"credentials.json not found at {cfg.credentials_path!r}. "
-            "Follow the README setup steps to create a service account."
+            f"credentials.json not found at {cred_path}. "
+            "Follow the README setup steps to create a service account "
+            "and place its JSON key next to the executable (or current directory)."
         )
 
     print("Connecting to Google Sheets…")
-    sheets, drive = build_clients(cfg.credentials_path)
+    sheets, drive = build_clients(str(cred_path))
 
     print("Fetching room availability…")
     room_book = fetch_with_grid(sheets, cfg.sheet_room)

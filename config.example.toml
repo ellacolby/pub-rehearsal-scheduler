@@ -1,16 +1,19 @@
-# Path to the Google Cloud service account JSON key
-credentials_path = "credentials.json"
+# Open this file in TextEdit (Mac) or Notepad (Windows) to make changes.
+# Save the file before re-running the scheduler. Change only what's inside the
+# quotes — keep the surrounding format intact.
 
-# Email to share the generated output sheet with (your account)
-share_with_email = "ella.r.colby@gmail.com"
+credentials_path = "credentials.json"
+share_with_email = "you@example.com"
 
 [sheets]
-# Spreadsheet IDs (the long string in the URL between /d/ and /edit)
-dancer_availability = "1x2jUuf8RCkwsmIhJiuLcS5VYtZX1MuG2sLaQhyiTmlA"
-room_availability   = "1qLxQ0EGMrgjGZ435Eqo0QhhfGH2QiDu8lI80vcMkhJU"
-casting             = "1uObvvWJYsz5eBcVVIViJ4ZpVk4zZrHXFRqF8coBUBtI"
-# Leave empty on first run — script will create the output sheet and print its URL.
-# Paste it here on subsequent runs to overwrite the same output sheet.
+# Paste full URLs from your browser. Both formats work:
+#   https://docs.google.com/spreadsheets/d/AbCdEf.../edit
+#   AbCdEf...
+dancer_availability = ""
+room_availability   = ""
+casting             = ""
+# Output sheet — create a blank Google Sheet, share it with the service-account
+# email as Editor, and paste its URL here.
 output              = ""
 
 [tabs]

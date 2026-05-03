@@ -1,12 +1,15 @@
+"""Top-level entry point for the bundled executable.
+
+PyInstaller treats this file as the entry script, so it cannot use relative
+imports. It just delegates to scheduler.__main__'s logic.
+"""
 import atexit
 import sys
 
-from .main import main
+from scheduler.main import main
 
 
 def _wait_on_exit() -> None:
-    """When frozen (double-clicked binary), pause so the window doesn't close
-    before the user can read the output."""
     if getattr(sys, "frozen", False):
         try:
             input("\nPress Enter to close…")
@@ -21,8 +24,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nCancelled.")
         sys.exit(130)
-    except Exception as e:  # pragma: no cover
-        # Surface unexpected errors clearly when running as a frozen binary
+    except Exception as e:
         import traceback
         print()
         print("ERROR:", e)

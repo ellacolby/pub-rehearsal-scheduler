@@ -29,15 +29,44 @@ If anything is missing, ask the team admin who built it.
 
 ## First time only — get past macOS Gatekeeper
 
-macOS will refuse to run an unsigned program the first time. To get past it:
+macOS will refuse to run an unsigned program the first time. **Don't click
+"Move to Trash"** when the warning appears. Instead, do one of the following:
 
-1. **Right-click** (or two-finger tap) on `Run PUB Scheduler.command`
-2. Choose **Open** from the menu
-3. macOS will show a warning — click **Open** again
-4. Done — you'll never see the warning again on your machine
+### On macOS Sequoia (15) and later
 
-You may also see the same warning for `pub-scheduler` itself the first time it
-launches. Same fix: right-click → Open.
+1. Double-click `Run PUB Scheduler.command` — a warning pops up
+2. Click **Done** (NOT "Move to Trash")
+3. Open **System Settings** → **Privacy & Security**
+4. Scroll all the way down to the **Security** section
+5. You'll see *"Run PUB Scheduler.command was blocked…"* with an
+   **Open Anyway** button next to it. Click it, authenticate.
+6. Try double-clicking the launcher again — this time you get a new dialog
+   with an **Open** button. Click it.
+7. You may need to repeat once for `pub-scheduler` itself (the binary the
+   launcher invokes).
+
+After that, double-click works normally forever. You only do this once per
+machine.
+
+### On macOS Sonoma (14) and earlier
+
+Right-click `Run PUB Scheduler.command` → **Open** → confirm in the dialog.
+
+### Faster way — Terminal one-liner (any macOS)
+
+Clears the "downloaded from internet" quarantine flag from the entire folder
+in one shot, so neither the launcher nor the binary triggers the warning:
+
+1. Open Terminal (⌘+Space → "Terminal" → Enter)
+2. Type this **with a trailing space**:
+   ```
+   xattr -dr com.apple.quarantine 
+   ```
+3. Drag the unzipped `PUB Scheduler` folder from Finder onto the Terminal
+   window — that pastes the path
+4. Press Enter
+
+After that, double-click works normally.
 
 ## Generating a schedule (every week)
 

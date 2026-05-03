@@ -38,7 +38,8 @@ LAUNCHER
     chmod +x "dist/Run PUB Scheduler.command"
     echo
     echo "Built: dist/pub-scheduler  +  dist/Run PUB Scheduler.command"
-    echo "On first launch, right-click the .command file → Open (to bypass macOS quarantine)."
+    echo "On first launch, see Instructions.md inside the zip — the macOS quarantine"
+    echo "flow changed in Sequoia 15+ (System Settings → Privacy & Security → Open Anyway)."
     ;;
   Linux)
     echo "Built: dist/pub-scheduler"
@@ -83,5 +84,5 @@ fi
 echo
 echo "✅ Ready to share: dist/PUB Scheduler.zip"
 echo
-echo "Send that zip to your teammates (Google Drive, iMessage, etc.). They just"
-echo "unzip it, then right-click 'Run PUB Scheduler.command' → Open."
+echo "Send that zip to your teammates (Google Drive, iMessage, etc.). They unzip,"
+echo "then follow the macOS-Gatekeeper steps in Instructions.md the first time."
